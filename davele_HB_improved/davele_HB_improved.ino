@@ -28,7 +28,12 @@ uint16_t error = 0;
 unsigned long duration;
 float freq,sumDuration;
 int countHB, bpm, err,startTime,startHB,loopTime;
+#include "heartbeats.h"
+long int startHB;
+long int stopHB;
+uint8_t countHB;
 
+uint8_t flag = 0;
 // variables for photoRes
 int photoR, lux;
 
@@ -99,42 +104,7 @@ void loop()
 
 
   // get 10 heartbeats and get frequency
-  countHB = 0;
-  err = 0;
-  startHB = millis();
-  for (int t=0; t<10; t++){
-    startTime = millis();
-    duration = pulseIn(PIN_POLAR, HIGH);
-    loopTime = millis() - startTime;
-    freq=60000/float(loopTime);
-    Serial.print("duration : ");
-    Serial.println(duration);
-    Serial.print("loopTime : ");
-    Serial.println(loopTime);
-    Serial.print("freq : ");
-    Serial.println(freq);
-    Serial.println("  ");
-
-    if (freq > 20 && freq < 240){
-      countHB++;
-      sumDuration += freq;
-    }
-    if (millis() - startHB > 30000) {
-      err = 1;
-      break;
-    }
-  }
-  bpm = round(sumDuration/countHB);
-  Serial.printf("\n bpm : %d\n", bpm);
-  countHB = 0;
-  sumDuration = 0;
-  
-  if (err==1){ // if the polar belt is not responding
-    lora_data[3] = 1;
-  }
-  else {
-    lora_data[3] = bpm;
-  }
+  lora_data[3] = heartbeats(PIN_POLAR, 1);
 
 
   // get luminosity
@@ -236,4 +206,72 @@ uint16_t readTFMini() {
   }
  }
  return distanceOut;  // Allways return the latest good value 
+}
+
+void timer1(void)
+{
+  startHB = millis();
+  detachInterrupt(input_pin);
+  flag = 1;
+}
+
+void timer2(void)
+{
+  countHB ++;
+  if(countHB == hb_max)
+  {
+    detachInterrupt(input_pin);
+    stopHB = millis();
+    flag = 3;
+  }
+}
+
+uint8_t heartbeats(int input_pin, int8_t hb_max)
+{
+  uint8_t data = 0;
+  uint8_t err = 0;
+  uint8_t loop = 1;
+  while(loop)    // boucle infini à modif plus tard
+  {
+    switch(flag)
+    {
+      case 0 : 
+        attachInterrupt(input_pin, timer1, RISING);
+        break;
+
+      case 1 :
+        attachInterrupt(input_pin, timer2, RISING);
+        flag++;
+        break;
+
+      case 2 :
+        //do nothing
+        break;
+
+      case 3 :
+        long int time = stopHB - startHB;              // valeur du temps en ms
+        uint8_t bpm = (uint8_t)((countHB/(time/1000))*60);  // conversion temps/battements en bpm
+        loop = 0;                         // on stop la boucle
+        break;
+
+      default :
+        // do nothing
+        break;
+    }
+    if((millis() - startHB) > hb_max*3000 && countHB <= hb_max) //si on prend des mesures et que l'on a que 1 battement au bout de 3s+ erreur
+    {
+      err == 1;
+      loop = 0;       // on stop la boucle
+    }
+  }
+
+  if (err==1)   //if the polar belt is not responding
+  {  
+    data = err;
+  }
+  else 
+  {
+    data = bpm;
+  }
+  return data;
 }
